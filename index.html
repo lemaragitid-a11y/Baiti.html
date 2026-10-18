@@ -11,8 +11,17 @@
 @media(max-width:1000px){.shell{grid-template-columns:210px 1fr}.content{padding:24px 20px}.topbar{padding:0 20px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.grid2{grid-template-columns:1fr}.hero{grid-template-columns:1.3fr .7fr}}
 @media(max-width:700px){.shell{display:block}.sidebar{position:fixed;z-index:10;left:-260px;top:0;bottom:0;width:246px;transition:left .25s;box-shadow:10px 0 40px #0002}.sidebar.open{left:0}.menu{display:grid;place-items:center;border:1px solid var(--line);background:#fff;border-radius:9px;width:36px;height:36px}.topbar{height:62px;padding:0 15px}.crumb{font-size:11px}.date{display:none}.content{padding:20px 14px 35px}.pagehead{display:block}.pagehead h2{font-size:25px}.pagehead .actions{margin-top:16px}.hero{padding:20px;grid-template-columns:1fr;gap:16px}.hero h3{font-size:21px}.hero-right{border-left:0;border-top:1px solid #ffffff24;padding:14px 0 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.hero-right strong{font-size:24px;margin:0}.hero-right span{width:100%}.metrics{gap:9px}.metric{padding:13px}.metric strong{font-size:22px}.metric-top{font-size:10px}.metric-icon{height:27px;width:27px}.panel{padding:15px}.tablepanel{padding:0}.tablepanel .panelhead{padding:16px 15px 0}.barrow{grid-template-columns:90px 1fr 30px;gap:7px}.formgrid{grid-template-columns:1fr}.field.full{grid-column:auto}.topright{gap:8px}.activityitem{grid-template-columns:30px 1fr auto;gap:8px}.activityitem time{font-size:9px}}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+#authGate{position:fixed;inset:0;z-index:100;background:#10251e;display:grid;place-items:center;padding:18px;color:#182b23}
+#authCard{width:min(440px,100%);background:#fff;border-radius:18px;padding:26px;box-shadow:0 20px 70px #0004}
+#authCard h2{margin:8px 0;font-size:24px}#authCard p{font-size:12px;color:#718078;line-height:1.6}
+#authCard label{display:block;font-size:12px;font-weight:800;margin:13px 0 6px}#authCard input{width:100%;padding:12px;border:1px solid #dce4dc;border-radius:9px;font:inherit}
+#authMessage{font-size:12px;color:#a33;margin-top:12px;white-space:pre-wrap}#cloudStatus{font-size:10px;color:#276342;background:#e7f5e9;border-radius:99px;padding:5px 8px;font-weight:700}
+</style>
 </head>
 <body>
+<div id="authGate"><div id="authCard"><div class="eyebrow">BAITI TRIBE · SECURE WORKSPACE</div><h2>Administrator sign in</h2><p>Sign in with the administrator account created in Supabase. Only an authorised administrator can access the organisation's records.</p><form id="authForm"><label for="authEmail">Administrator email</label><input id="authEmail" type="email" autocomplete="username" required><label for="authPassword">Password</label><input id="authPassword" type="password" autocomplete="current-password" required><button class="btn primary" style="width:100%;margin-top:18px" type="submit">Sign in securely</button></form><div id="authMessage" role="status"></div><p>Cloud access is protected by Supabase authentication and administrator policies. Do not share your password.</p></div></div>
 <div class="shell">
 <aside class="sidebar" id="sidebar">
   <div class="brand"><div class="mark">B.</div><div><h1>BAITI TRIBE</h1><p>IMPACT COMMAND CENTRE</p></div></div>
@@ -26,12 +35,12 @@
   <div><div class="navlabel">Manage</div><nav class="nav">
     <button data-page="settings"><span class="ico">⚙</span> Organisation profile</button>
   </nav></div>
-  <div class="sidebottom"><b>Built for accountable impact.</b><p>A practical workspace for tracking community work, one record at a time.</p><span class="pill">● DEMO WORKSPACE</span></div>
+  <div class="sidebottom"><b>Built for accountable impact.</b><p>A practical workspace for tracking community work, one record at a time.</p><span class="pill">● ADMIN CLOUD WORKSPACE</span></div>
 </aside>
 <main class="main">
   <header class="topbar">
     <div style="display:flex;align-items:center;gap:10px"><button class="menu" id="menuBtn" aria-label="Open navigation">☰</button><div class="crumb">Workspace&nbsp; / &nbsp;<strong id="crumb">Overview</strong></div></div>
-    <div class="topright"><span class="date" id="today"></span><div class="avatar" title="Workspace profile">BT</div></div>
+    <div class="topright"><span id="cloudStatus">● Cloud workspace</span><span class="date" id="today"></span><button class="btn" id="signOutBtn" type="button">Sign out</button><div class="avatar" title="Workspace profile">BT</div></div>
   </header>
   <div class="content">
     <section class="page active" id="page-overview">
@@ -110,9 +119,46 @@ const seedBeneficiaries=[
 {id:5,group:"Youth leadership cohort",programme:"Youth Leadership Programme",people:180,date:"2026-10-09",notes:"Illustrative group total"}
 ];
 const clone=x=>JSON.parse(JSON.stringify(x));
-function load(key,fallback){try{const x=localStorage.getItem("baiti_"+key);return x?JSON.parse(x):clone(fallback)}catch(e){return clone(fallback)}}
-let projects=load("projects",seedProjects),transactions=load("transactions",seedTransactions),beneficiaries=load("beneficiaries",seedBeneficiaries);
-let profile=load("profile",{name:"BAITI Tribe",email:"",location:"Kenya",mission:"Empowering communities through digital literacy, sustainable livelihoods, climate action, WASH, human rights and leadership."});
+const defaultProfile={name:"BAITI Tribe",email:"",location:"Kenya",mission:"Empowering communities through digital literacy, sustainable livelihoods, climate action, WASH, human rights and leadership."};
+// The live version loads records from Supabase after an authorised administrator signs in.
+let projects=[],transactions=[],beneficiaries=[],profile=clone(defaultProfile),profileRowId=null;
+let supabaseClient=null, currentSession=null, cloudReady=false;
+const SUPABASE_URL="https://xgjaxkbyunaoblolckum.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY="sb_publishable_BxHl6ZY8hWx2K588Cdavjg_X-vuoBpM";
+supabaseClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+function uuid(){return crypto.randomUUID()}
+function setAuthMessage(s){document.getElementById("authMessage").textContent=s}
+function updateCloudStatus(s){document.getElementById("cloudStatus").textContent=s}
+function mapProject(r){return {id:r.id,name:r.name,category:r.category||r.description||"Other",budget:Number(r.budget||0),people:Number(r.people||0),status:r.status||"Planning",owner:r.owner||profile.name}}
+function mapTransaction(r){return {id:r.id,date:r.date,type:r.type,description:r.description,project:r.project||"",reference:r.reference||"",amount:Number(r.amount||0)}}
+function mapBeneficiary(r){return {id:r.id,group:r.group_name,programme:r.programme,people:Number(r.people||0),date:r.recorded_date,notes:r.notes||""}}
+async function loadCloudRecords(){
+ const [pr,tr,br,or]=await Promise.all([
+  supabaseClient.from("projects").select("*").order("created_at",{ascending:true}),
+  supabaseClient.from("transactions").select("*").order("date",{ascending:false}),
+  supabaseClient.from("beneficiaries").select("*").order("recorded_date",{ascending:false}),
+  supabaseClient.from("organisation_profile").select("*").order("created_at",{ascending:true}).limit(1)
+ ]);
+ for(const r of [pr,tr,br,or]) if(r.error) throw r.error;
+ projects=(pr.data||[]).map(mapProject);transactions=(tr.data||[]).map(mapTransaction);beneficiaries=(br.data||[]).map(mapBeneficiary);
+ if(or.data&&or.data.length){const o=or.data[0];profileRowId=o.id;profile={name:o.name||"BAITI Tribe",email:o.email||"",location:o.location||"Kenya",mission:o.mission||""}}
+ else {profile=clone(defaultProfile);profileRowId=null}
+ // Never import illustrative demo records into the live organisation database.
+ cloudReady=true; render();generateReport();updateCloudStatus("● Connected · Cloud data");
+}
+async function verifyAdministrator(){const {data,error}=await supabaseClient.rpc("is_app_admin");if(error)throw new Error("Could not verify administrator access. Check the is_app_admin() function and app_admins entry.");if(data!==true)throw new Error("This account is not listed as an authorised BAITI administrator.");}
+async function signIn(email,password){setAuthMessage("Signing in…");const {data,error}=await supabaseClient.auth.signInWithPassword({email,password});if(error)throw error;currentSession=data.session;await verifyAdministrator();await loadCloudRecords();document.getElementById("authGate").style.display="none";}
+document.getElementById("authForm").addEventListener("submit",async e=>{e.preventDefault();const email=document.getElementById("authEmail").value.trim(),password=document.getElementById("authPassword").value;try{await signIn(email,password);setAuthMessage("")}catch(err){await supabaseClient.auth.signOut();currentSession=null;cloudReady=false;setAuthMessage(err.message||"Sign in failed. Check your email and password.")}});
+document.getElementById("signOutBtn").addEventListener("click",async()=>{await supabaseClient.auth.signOut();currentSession=null;cloudReady=false;document.getElementById("authGate").style.display="grid";setAuthMessage("You have signed out.");updateCloudStatus("● Signed out")});
+async function syncAllToCloud(){if(!cloudReady)throw new Error("Sign in as an authorised administrator first.");
+ const p=projects.map(x=>({id:x.id,name:x.name,category:x.category||"Other",description:x.category||"",budget:Number(x.budget||0),people:Number(x.people||0),status:x.status||"Planning",owner:x.owner||profile.name}));
+ const t=transactions.map(x=>({id:x.id,date:x.date,type:x.type,description:x.description,project:x.project||"",reference:x.reference||"",amount:Number(x.amount||0)}));
+ const b=beneficiaries.map(x=>({id:x.id,group_name:x.group,programme:x.programme,people:Number(x.people||0),recorded_date:x.date,notes:x.notes||""}));
+ for(const [table,rows] of [["projects",p],["transactions",t],["beneficiaries",b]]){if(rows.length){const {error}=await supabaseClient.from(table).upsert(rows);if(error)throw error}}
+ const row={name:profile.name,email:profile.email,location:profile.location,mission:profile.mission};if(profileRowId)row.id=profileRowId;
+ const result=await supabaseClient.from("organisation_profile").upsert(row).select().single();if(result.error)throw result.error;profileRowId=result.data.id;
+}
+
 const money=n=>"KES "+Number(n||0).toLocaleString("en-KE",{maximumFractionDigits:0});
 const compact=n=>{n=Number(n||0);if(n>=1e6)return "KES "+(n/1e6).toFixed(2).replace(/0$/,"").replace(/\.$/,"")+"M";if(n>=1e3)return "KES "+Math.round(n/1e3)+"K";return money(n)};
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -131,7 +177,7 @@ document.getElementById("menuBtn").addEventListener("click",()=>document.getElem
 document.getElementById("today").textContent=new Date().toLocaleDateString("en-KE",{weekday:"short",day:"numeric",month:"short",year:"numeric"});
 function statusClass(s){return s==="Planning"?"planning":s==="Complete"?"complete":""}
 function render(){
-save();
+if(cloudReady) save();
 const active=projects.filter(p=>p.status==="Active").length;
 document.getElementById("mProjects").textContent=active;
 document.getElementById("mReceived").textContent=compact(income());
@@ -163,24 +209,25 @@ function renderBeneficiaries(){document.getElementById("beneficiaryRows").innerH
 document.getElementById("projectFilter").addEventListener("change",renderProjects);
 document.getElementById("transactionFilter").addEventListener("change",renderTransactions);
 function modal(title,subtitle,body,onSubmit){const root=document.getElementById("modalRoot");root.innerHTML=`<div id="shade" style="position:fixed;inset:0;background:#0a1b12a8;z-index:20;display:grid;place-items:center;padding:16px"><div style="background:#fff;width:min(540px,100%);max-height:92vh;overflow:auto;border-radius:17px;padding:23px;box-shadow:0 20px 80px #0003"><div style="display:flex;justify-content:space-between;gap:12px;align-items:start;margin-bottom:19px"><div><div class="eyebrow">WORKSPACE RECORD</div><h3 style="font-size:21px;margin:7px 0">${title}</h3><p style="font-size:12px;color:var(--muted);margin:0">${subtitle}</p></div><button class="btn" id="closeModal" type="button">✕</button></div><form id="modalForm">${body}<div class="formactions"><button class="btn" id="cancelModal" type="button">Cancel</button><button class="btn primary" type="submit">Save record</button></div></form></div></div>`;
-const close=()=>root.innerHTML="";document.getElementById("closeModal").onclick=close;document.getElementById("cancelModal").onclick=close;document.getElementById("shade").addEventListener("click",e=>{if(e.target.id==="shade")close()});document.getElementById("modalForm").addEventListener("submit",e=>{e.preventDefault();const fd=new FormData(e.target);const obj=Object.fromEntries(fd.entries());const result=onSubmit(obj);if(result!==false){close();render();toast("Record saved to this browser.")}});
+const close=()=>root.innerHTML="";document.getElementById("closeModal").onclick=close;document.getElementById("cancelModal").onclick=close;document.getElementById("shade").addEventListener("click",e=>{if(e.target.id==="shade")close()});document.getElementById("modalForm").addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.target);const obj=Object.fromEntries(fd.entries());try{const result=onSubmit(obj);if(result!==false){await syncAllToCloud();close();render();toast("Record saved securely to Supabase.")}}catch(err){toast("Save failed: "+(err.message||"Check connection and table permissions."))}});
 }
 const field=(label,name,type="text",placeholder="",required=true,extra="")=>`<div class="field"><label>${label}</label><input name="${name}" type="${type}" placeholder="${placeholder}" ${required?"required":""} ${extra}></div>`;
 const projectOptions=()=>projects.map(p=>`<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
-document.getElementById("addProjectBtn").onclick=()=>modal("Add a project","Create a new programme record.",`<div class="formgrid">${field("Project name","name","text","e.g. Youth skills programme")}<div class="field"><label>Category</label><select name="category" required><option>Digital inclusion</option><option>Education & technology</option><option>Water & sanitation</option><option>Climate action</option><option>Sustainable livelihoods</option><option>Human rights</option><option>Leadership</option><option>Other</option></select></div>${field("Planned budget (KES)","budget","number","0",true,'min="0" step="1"')}${field("People expected to reach","people","number","0",true,'min="0" step="1"')}<div class="field"><label>Status</label><select name="status"><option>Planning</option><option>Active</option><option>Complete</option></select></div>${field("Project lead / owner","owner","text",profile.name,false)}</div>`,o=>{projects.unshift({id:Date.now(),name:o.name.trim(),category:o.category,budget:Number(o.budget),people:Number(o.people),status:o.status,owner:o.owner||profile.name});return true});
-document.getElementById("addTransactionBtn").onclick=()=>modal("Add a transaction","Enter a verified contribution or expense.",`<div class="formgrid"><div class="field"><label>Transaction type</label><select name="type" required><option>Income</option><option>Expense</option></select></div>${field("Date","date","date",new Date().toISOString().slice(0,10),true,`value="${new Date().toISOString().slice(0,10)}"`)}<div class="field full"><label>Description</label><input name="description" required placeholder="What was received or paid for?"></div><div class="field"><label>Project</label><select name="project"><option>General / unrestricted</option>${projectOptions()}</select></div>${field("Amount (KES)","amount","number","0",true,'min="1" step="1"')}${field("Receipt / reference number","reference","text","e.g. MPESA reference",false)}</div><div class="notice">Only record transactions you can substantiate with a receipt, statement or approved record.</div>`,o=>{transactions.unshift({id:Date.now(),date:o.date,type:o.type,description:o.description.trim(),project:o.project,reference:o.reference||"Not provided",amount:Number(o.amount)});return true});
-document.getElementById("addBeneficiaryBtn").onclick=()=>modal("Add a group reach record","Use aggregate totals; avoid personal identifiers.",`<div class="formgrid">${field("Community / group name","group","text","e.g. Training cohort C")}<div class="field"><label>Programme</label><select name="programme" required>${projects.map(p=>`<option>${esc(p.name)}</option>`).join("")}<option>Other programme</option></select></div>${field("Number of people reached","people","number","0",true,'min="0" step="1"')}${field("Date recorded","date","date","",true,`value="${new Date().toISOString().slice(0,10)}"`)}<div class="field full"><label>Evidence / notes</label><input name="notes" placeholder="Attendance register, distribution log, etc."></div></div>`,o=>{beneficiaries.unshift({id:Date.now(),group:o.group.trim(),programme:o.programme,people:Number(o.people),date:o.date,notes:o.notes||""});return true});
+document.getElementById("addProjectBtn").onclick=()=>modal("Add a project","Create a new programme record.",`<div class="formgrid">${field("Project name","name","text","e.g. Youth skills programme")}<div class="field"><label>Category</label><select name="category" required><option>Digital inclusion</option><option>Education & technology</option><option>Water & sanitation</option><option>Climate action</option><option>Sustainable livelihoods</option><option>Human rights</option><option>Leadership</option><option>Other</option></select></div>${field("Planned budget (KES)","budget","number","0",true,'min="0" step="1"')}${field("People expected to reach","people","number","0",true,'min="0" step="1"')}<div class="field"><label>Status</label><select name="status"><option>Planning</option><option>Active</option><option>Complete</option></select></div>${field("Project lead / owner","owner","text",profile.name,false)}</div>`,o=>{projects.unshift({id:uuid(),name:o.name.trim(),category:o.category,budget:Number(o.budget),people:Number(o.people),status:o.status,owner:o.owner||profile.name});return true});
+document.getElementById("addTransactionBtn").onclick=()=>modal("Add a transaction","Enter a verified contribution or expense.",`<div class="formgrid"><div class="field"><label>Transaction type</label><select name="type" required><option>Income</option><option>Expense</option></select></div>${field("Date","date","date",new Date().toISOString().slice(0,10),true,`value="${new Date().toISOString().slice(0,10)}"`)}<div class="field full"><label>Description</label><input name="description" required placeholder="What was received or paid for?"></div><div class="field"><label>Project</label><select name="project"><option>General / unrestricted</option>${projectOptions()}</select></div>${field("Amount (KES)","amount","number","0",true,'min="1" step="1"')}${field("Receipt / reference number","reference","text","e.g. MPESA reference",false)}</div><div class="notice">Only record transactions you can substantiate with a receipt, statement or approved record.</div>`,o=>{transactions.unshift({id:uuid(),date:o.date,type:o.type,description:o.description.trim(),project:o.project,reference:o.reference||"Not provided",amount:Number(o.amount)});return true});
+document.getElementById("addBeneficiaryBtn").onclick=()=>modal("Add a group reach record","Use aggregate totals; avoid personal identifiers.",`<div class="formgrid">${field("Community / group name","group","text","e.g. Training cohort C")}<div class="field"><label>Programme</label><select name="programme" required>${projects.map(p=>`<option>${esc(p.name)}</option>`).join("")}<option>Other programme</option></select></div>${field("Number of people reached","people","number","0",true,'min="0" step="1"')}${field("Date recorded","date","date","",true,`value="${new Date().toISOString().slice(0,10)}"`)}<div class="field full"><label>Evidence / notes</label><input name="notes" placeholder="Attendance register, distribution log, etc."></div></div>`,o=>{beneficiaries.unshift({id:uuid(),group:o.group.trim(),programme:o.programme,people:Number(o.people),date:o.date,notes:o.notes||""});return true});
 document.getElementById("quickAdd").onclick=()=>{showPage("projects");document.getElementById("addProjectBtn").click()};
 document.getElementById("projectsCsv").onclick=()=>csvDownload("baiti-project-register.csv",[["Project","Category","Budget KES","People","Status","Owner"],...projects.map(p=>[p.name,p.category,p.budget,p.people,p.status,p.owner])]);
 document.getElementById("ledgerCsv").onclick=()=>csvDownload("baiti-financial-ledger.csv",[["Date","Type","Description","Project","Reference","Amount KES"],...transactions.map(t=>[t.date,t.type,t.description,t.project,t.reference,t.amount])]);
 document.getElementById("beneficiaryCsv").onclick=()=>csvDownload("baiti-community-reach.csv",[["Group","Programme","People reached","Date","Notes"],...beneficiaries.map(b=>[b.group,b.programme,b.people,b.date,b.notes])]);
 document.getElementById("exportAll").onclick=()=>{downloadText("baiti-workspace-backup.json",JSON.stringify({profile,projects,transactions,beneficiaries,exportedAt:new Date().toISOString()},null,2));toast("Workspace backup prepared.")};
-document.getElementById("settingsForm").addEventListener("submit",e=>{e.preventDefault();profile={name:document.getElementById("orgName").value.trim(),email:document.getElementById("orgEmail").value.trim(),location:document.getElementById("orgLocation").value.trim(),mission:document.getElementById("orgMission").value.trim()};save();toast("Organisation profile saved.")});
+document.getElementById("settingsForm").addEventListener("submit",e=>{e.preventDefault();profile={name:document.getElementById("orgName").value.trim(),email:document.getElementById("orgEmail").value.trim(),location:document.getElementById("orgLocation").value.trim(),mission:document.getElementById("orgMission").value.trim()};save();syncAllToCloud().then(()=>toast("Organisation profile saved to Supabase.")).catch(err=>toast("Cloud save failed: "+err.message))});
 function reportText(){const period=document.getElementById("reportPeriod").value,focus=document.getElementById("reportFocus").value;return `${profile.name.toUpperCase()} — COMMUNITY IMPACT REPORT\n${period} | ${new Date().toLocaleDateString("en-KE",{day:"numeric",month:"long",year:"numeric"})}\n\nMISSION\n${profile.mission}\n\nEXECUTIVE SNAPSHOT\nProjects recorded: ${projects.length}\nActive projects: ${projects.filter(p=>p.status==="Active").length}\nTotal planned project budgets: ${money(sum(projects,"budget"))}\nFunds recorded as received: ${money(income())}\nExpenses recorded: ${money(expenses())}\nBalance of recorded transactions: ${money(income()-expenses())}\nAggregate people reached: ${reach().toLocaleString()}\n\nPROGRAMME REGISTER\n${projects.map((p,i)=>`${i+1}. ${p.name} | ${p.category} | Budget ${money(p.budget)} | Reach ${Number(p.people||0).toLocaleString()} | Status: ${p.status}`).join("\n")}\n\nFINANCIAL RECORDS\n${transactions.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t=>`${t.date} | ${t.type} | ${t.description} | ${t.project} | ${t.reference} | ${money(t.amount)}`).join("\n")}\n\nREPORT EMPHASIS\n${focus}\n\nDATA QUALITY & ACCOUNTABILITY NOTE\nThis draft is generated from the records currently saved in the BAITI Tribe prototype. Some starting records are illustrative demo data and must not be represented as verified actual results. Reconcile all financial figures, validate beneficiary totals, confirm the reporting period, and attach source documents before external circulation.\n\nContact: ${profile.email||"Add an official contact email in Organisation Profile"}\nOperating area: ${profile.location||"Not specified"}\n`}
 function generateReport(){document.getElementById("reportPreview").textContent=reportText()}
 document.getElementById("generateReport").onclick=()=>{generateReport();toast("Report preview updated.")};
 document.getElementById("downloadReport").onclick=()=>downloadText("baiti-impact-report-draft.txt",reportText());
-render();generateReport();
+// Check for an existing session; every session must still pass the administrator check.
+(async()=>{try{const {data}=await supabaseClient.auth.getSession();if(data.session){currentSession=data.session;await verifyAdministrator();await loadCloudRecords();document.getElementById("authGate").style.display="none"}}catch(err){await supabaseClient.auth.signOut();setAuthMessage(err.message||"Please sign in again.")}})();
 </script>
 </body>
 </html>
